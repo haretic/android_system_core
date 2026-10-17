@@ -72,6 +72,10 @@ class BatteryMonitor {
     BatteryMonitor();
     ~BatteryMonitor();
     void init(struct healthd_config *hc);
+    // Before publishing a Health service, seed this monitor's existing level
+    // cache with a real reading. Call only before concurrent monitor access.
+    // Zero is valid. Runtime update/expiry behavior is unchanged.
+    status_t primeBatteryLevel();
     int getChargeStatus();
     status_t getProperty(int id, struct BatteryProperty *val);
     void dumpState(int fd);

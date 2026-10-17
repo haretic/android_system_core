@@ -379,6 +379,16 @@ static base::Result<T, base::Errno, false> tryGetIntField(const String8& path) {
     return value;
 }
 
+status_t BatteryMonitor::primeBatteryLevel() {
+    if (!mHealthdConfig || !mBatteryDevicePresent) return -ENODEV;
+    if (mBatteryFixedCapacity) return -EPERM;
+    const auto value = tryGetIntField<int32_t>(mHealthdConfig->batteryCapacityPath);
+    if (!value.ok()) return -value.error().code();
+    if (value.value() < 0 || value.value() > 100) return -ERANGE;
+    mLastGoodBatteryLevel = {std::chrono::steady_clock::now(), value.value()};
+    return OK;
+}
+
 static base::Result<std::optional<std::string>, base::Errno, false> getPrintableStringField(
         const String8& path) {
     std::string buf;
