@@ -197,12 +197,17 @@ static int __ashmem_check_failure(int fd, int result) {
 static bool is_memfd_fd(int fd) {
     std::string fd_path = android::base::StringPrintf("/proc/self/fd/%d", fd);
     std::string result;
-    if (!android::base::Readlink(fd_path, &result)) {
-        ALOGE("readlink(%s) failed: %m", fd_path.c_str());
-        return false;
-    }
-
-    if (!result.starts_with("/memfd:")) {
+    bool have_name = android::base::Readlink(fd_path, &result);
+    if (!have_name) {
+        // Sandboxed processes may not be able to resolve /proc/self/fd links; Chromium's renderer
+        // seccomp policy fails readlinkat() with EPERM, for example. Fall back to the file seals
+        // below: the kernel creates every shmem file with F_SEAL_SEAL set, and only
+        // memfd_create(MFD_ALLOW_SEALING) clears it, so a file carrying F_SEAL_GROW and
+        // F_SEAL_SHRINK must be a sealable memfd.
+        if (debug_log) {
+            ALOGD("readlink(%s) failed: %m, checking seals instead", fd_path.c_str());
+        }
+    } else if (!result.starts_with("/memfd:")) {
         return false;
     }
 
@@ -212,7 +217,10 @@ static bool is_memfd_fd(int fd) {
     // process is using it, leading to time of check to time of use issues.
     int seals = fcntl(fd, F_GET_SEALS);
     if (seals == -1) {
-        ALOGE("is_memfd_fd(%d): F_GET_SEALS failed: %m", fd);
+        // Without the name, F_GET_SEALS failing (EINVAL) is how a non-memfd fd is recognized.
+        if (have_name) {
+            ALOGE("is_memfd_fd(%d): F_GET_SEALS failed: %m", fd);
+        }
         return false;
     }
 
