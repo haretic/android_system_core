@@ -19,6 +19,8 @@
 #include <grp.h>
 #include <pwd.h>
 
+#include <algorithm>
+
 #include <android-base/parseint.h>
 
 #include "import_parser.h"
@@ -157,7 +159,14 @@ Result<void> ParseParallelRestoreconDirsLine(std::vector<std::string>&& args,
         return Error() << "parallel_restorecon_dir lines must have exactly 2 parameters";
     }
 
-    std::move(std::next(args.begin()), args.end(), std::back_inserter(*parallel_restorecon_dirs));
+    // A file imported twice (ueventd.${ro.board.platform}.rc and
+    // ueventd.${ro.hardware}.rc naming the same file) lists each directory
+    // twice; coldboot would then restorecon every subdirectory twice.
+    if (std::find(parallel_restorecon_dirs->begin(), parallel_restorecon_dirs->end(), args[1]) !=
+        parallel_restorecon_dirs->end()) {
+        return {};
+    }
+    parallel_restorecon_dirs->emplace_back(std::move(args[1]));
 
     return {};
 }

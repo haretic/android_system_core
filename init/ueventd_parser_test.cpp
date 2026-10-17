@@ -273,6 +273,22 @@ parallel_restorecon_dir /sys/devices
     TestUeventdFile(ueventd_file, {{}, {}, {}, {}, {}, {}, parallel_restorecon_dirs});
 }
 
+TEST(ueventd_parser, ParallelRestoreconDirsDuplicates) {
+    auto ueventd_file = R"(
+parallel_restorecon_dir /sys
+parallel_restorecon_dir /sys/devices
+parallel_restorecon_dir /sys
+parallel_restorecon_dir /sys/devices
+)";
+
+    auto parallel_restorecon_dirs = std::vector<std::string>{
+            "/sys",
+            "/sys/devices",
+    };
+
+    TestUeventdFile(ueventd_file, {{}, {}, {}, {}, {}, {}, parallel_restorecon_dirs});
+}
+
 TEST(ueventd_parser, UeventSocketRcvbufSize) {
     auto ueventd_file = R"(
 uevent_socket_rcvbuf_size 8k
