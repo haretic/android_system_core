@@ -29,11 +29,14 @@
 #include <unistd.h>
 
 #include <thread>
+#include <vector>
 
 #include <android-base/chrono_utils.h>
 #include <android-base/logging.h>
 #include <android-base/properties.h>
 #include <fstab/fstab.h>
+#include <selinux/android.h>
+#include <selinux/label.h>
 
 #include "coldboot.h"
 #include "devices.h"
@@ -176,6 +179,39 @@ void parallel_main_loop(const UeventListener& uevent_listener,
     });
 }
 
+// Every restorecon ueventd does is under /sys (coldboot and FixupSysPermissions()), so give
+// selinux_android_restorecon() a handle holding only the file_contexts specs that can match
+// there. With the full handle each sysfs file is matched against every stem-less spec, such as
+// the "/(vendor|system/vendor)/..." ones, and the per-uevent recursive restorecons of loop, dm
+// and bdi devices kept ueventd busy for most of boot, delaying the nodes of drivers loaded
+// after coldboot (GPU, Wi-Fi, modem). Same files as selinux_android_file_context_handle().
+static void UseSysfsRestoreconHandle() {
+    static const char* const kFileContexts[][2] = {
+            {"/system/etc/selinux/plat_file_contexts", "/plat_file_contexts"},
+            {"/system_ext/etc/selinux/system_ext_file_contexts", "/system_ext_file_contexts"},
+            {"/product/etc/selinux/product_file_contexts", "/product_file_contexts"},
+            {"/vendor/etc/selinux/vendor_file_contexts", "/vendor_file_contexts"},
+            {"/odm/etc/selinux/odm_file_contexts", "/odm_file_contexts"},
+    };
+    std::vector<selinux_opt> opts;
+    for (const auto& alts : kFileContexts) {
+        for (const char* path : alts) {
+            if (access(path, R_OK) == 0) {
+                opts.push_back({SELABEL_OPT_PATH, path});
+                break;
+            }
+        }
+    }
+    opts.push_back({SELABEL_OPT_BASEONLY, reinterpret_cast<const char*>(1)});
+    opts.push_back({SELABEL_OPT_SUBSET, "/sys/"});
+    selabel_handle* handle = selabel_open(SELABEL_CTX_FILE, opts.data(), opts.size());
+    if (!handle) {
+        PLOG(ERROR) << "Could not open the /sys file_contexts subset, using the full handle";
+        return;
+    }
+    selinux_android_set_sehandle(handle);
+}
+
 int ueventd_main(int argc, char** argv) {
     /*
      * init sets the umask to 077 for forked processes. We need to
@@ -190,6 +226,7 @@ int ueventd_main(int argc, char** argv) {
 
     SelinuxSetupKernelLogging();
     SelabelInitialize();
+    UseSysfsRestoreconHandle();
 
     std::vector<std::shared_ptr<UeventHandler>> uevent_handlers;
 
